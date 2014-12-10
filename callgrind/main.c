@@ -1711,10 +1711,43 @@ ULong syscalltime[VG_N_THREADS];
 UInt syscalltime[VG_N_THREADS];
 #endif
 
+Bool CLG_(open_close_file_current) = False;
+Int CLG_(num_of_close_file_fds) = 0;
+Int CLG_(close_file_fds)[16] = {0};
+
 static
 void CLG_(pre_syscalltime)(ThreadId tid, UInt syscallno,
                            UWord* args, UInt nArgs)
 {
+  if (CLG_(clo).collect_openclose){
+    /* count between Open/Close */
+    if (syscallno == 5){ /* open */
+      CLG_DEBUG(-1, "system call open: filename = %s\n", (HChar*)args[0])
+
+      if (VG_(strcmp)((HChar*)args[0], CLG_(clo).collect_openfile) == 0){ /* filename */
+        CLG_DEBUG(-1, "collect openfile open\n");
+        /* start instrumentation */
+        CLG_(set_instrument_state)("Collect open close", True);
+      }
+      else if (VG_(strcmp)((HChar*)args[0], CLG_(clo).collect_closefile) == 0){ /* filename */
+        CLG_DEBUG(-1, "collect closefile open\n");
+
+        CLG_(open_close_file_current) = True;
+      }
+    }
+    else if (syscallno == 6){ /* close */
+      CLG_DEBUG(-1, "system call close: fd number = %d\n", (Int)args[0])
+      CLG_DEBUG(-1, "close file fds: %d\n", CLG_(close_file_fds)[0])
+
+      if ((Int)args[0] == CLG_(close_file_fds)[0]){ /* fd */
+        CLG_DEBUG(-1, "collect closefile close\n");
+        /* stop instrumentation */
+        CLG_(set_instrument_state)("Collect closefile close", False);
+      }
+    }
+  }
+
+
   if (CLG_(clo).collect_systime) {
 #if CLG_MICROSYSTIME
     struct vki_timeval tv_now;
@@ -1730,6 +1763,17 @@ static
 void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
                             UWord* args, UInt nArgs, SysRes res)
 {
+  if (CLG_(clo).collect_openclose){
+    /* count between Open/Close */
+    if (CLG_(open_close_file_current) == True){ /* open */
+      CLG_DEBUG(-1, "collect closefile fd = %d\n", (Int)sr_Res(res))
+
+      CLG_(num_of_close_file_fds) = 1;
+      CLG_(close_file_fds)[0] = sr_Res(res);
+      CLG_(open_close_file_current) = False;
+    }
+  }
+
   if (CLG_(clo).collect_systime &&
       CLG_(current_state).bbcc) {
       Int o;
@@ -2018,6 +2062,13 @@ void CLG_(post_clo_init)(void)
       VG_(message)(Vg_UserMsg,
                    "For interactive control, run 'callgrind_control -h'.\n");
    }
+
+   if (CLG_(clo).collect_openclose) {
+       CLG_(instrument_state) = False;
+       CLG_(clo).collect_openfile = "input.txt";
+       CLG_(clo).collect_closefile = "output.txt";
+   }
+   CLG_DEBUG(-1, "collect_openclose is %s.\n", CLG_(clo).collect_openclose?"True":"False");
 }
 
 static

@@ -533,6 +533,7 @@ Bool CLG_(process_cmd_line_option)(const HChar* arg)
    else if VG_BOOL_CLO(arg, "--simulate-cache",  CLG_(clo).simulate_cache) {}
    /* for option compatibility with cachegrind */
    else if VG_BOOL_CLO(arg, "--branch-sim",      CLG_(clo).simulate_branch) {}
+   else if VG_BOOL_CLO(arg, "--collect-openclose", CLG_(clo).collect_openclose) {}
    else {
        Bool isCachesimOption = (*CLG_(cachesim).parse_opt)(arg);
 
@@ -668,4 +669,7 @@ void CLG_(set_clo_defaults)(void)
   CLG_(clo).verbose = 0;
   CLG_(clo).verbose_start = 0;
 #endif
+  
+  /* count between Open/Close */
+  CLG_(clo).collect_openclose = False;
 }
