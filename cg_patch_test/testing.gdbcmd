@@ -1,0 +1,9 @@
+file ../inst/bin/valgrind
+set args --tool=callgrind --callgrind-out-file=callout.bsortcppOC --collect-openclose=yes ./bsort
+set breakpoint pending on
+br vgCallgrind_pre_syscalltime if syscallno==5 || syscallno==6
+
+define c_bt
+    c
+    bt
+end
