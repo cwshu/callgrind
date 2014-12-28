@@ -1766,15 +1766,25 @@ void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
 Bool CLG_(open_close_file_current) = False;
 Int CLG_(num_of_close_file_fds) = 0;
 Int CLG_(close_file_fds)[16] = {0};
-Int CLG_(coc_dbg_level) = 1;
-/*** collect_openclose patch end ***/
+Int CLG_(coc_dbg_level) = -1;
+#if defined(VGP_x86_linux)
+    Int CLG_(sys_open_num) = 5;
+    Int CLG_(sys_close_num) = 6;
+#elif defined(VGP_amd64_linux)
+    Int CLG_(sys_open_num) = 2;
+    Int CLG_(sys_close_num) = 3;
+#else
+    CLG_DEBUG(CLG_(coc_dbg_level), "Unsupported platform, open()/close() use x86 system call number");
+    Int CLG_(sys_open_num) = 5;
+    Int CLG_(sys_close_num) = 6;
+#endif
 
 static
 void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
                            UWord* args, UInt nArgs){
   if (CLG_(clo).collect_openclose){
     /* count between Open/Close */
-    if (syscallno == 5){ /* open */
+    if (syscallno == CLG_(sys_open_num)){ /* open */
       CLG_DEBUG(CLG_(coc_dbg_level), "system call open: filename = %s\n", (HChar*)args[0])
 
       if (VG_(strcmp)((HChar*)args[0], CLG_(clo).collect_openfile) == 0){ /* filename */
@@ -1788,7 +1798,7 @@ void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
         CLG_(open_close_file_current) = True;
       }
     }
-    else if (syscallno == 6){ /* close */
+    else if (syscallno == CLG_(sys_close_num)){ /* close */
       CLG_DEBUG(CLG_(coc_dbg_level), "system call close: fd number = %d\n", (Int)args[0])
       CLG_DEBUG(CLG_(coc_dbg_level), "close file fds: %d\n", CLG_(close_file_fds)[0])
 
