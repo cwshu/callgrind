@@ -1711,41 +1711,46 @@ ULong syscalltime[VG_N_THREADS];
 UInt syscalltime[VG_N_THREADS];
 #endif
 
+/*** collect_openclose patch ***/
 Bool CLG_(open_close_file_current) = False;
 Int CLG_(num_of_close_file_fds) = 0;
 Int CLG_(close_file_fds)[16] = {0};
+Int CLG_(coc_dbg_level) = 1;
+/*** collect_openclose patch end ***/
 
 static
 void CLG_(pre_syscalltime)(ThreadId tid, UInt syscallno,
                            UWord* args, UInt nArgs)
 {
+  /*** collect_openclose patch ***/
   if (CLG_(clo).collect_openclose){
     /* count between Open/Close */
     if (syscallno == 5){ /* open */
-      CLG_DEBUG(-1, "system call open: filename = %s\n", (HChar*)args[0])
+      CLG_DEBUG(CLG_(coc_dbg_level), "system call open: filename = %s\n", (HChar*)args[0])
 
       if (VG_(strcmp)((HChar*)args[0], CLG_(clo).collect_openfile) == 0){ /* filename */
-        CLG_DEBUG(-1, "collect openfile open\n");
+        CLG_DEBUG(CLG_(coc_dbg_level), "collect openfile open\n");
         /* start instrumentation */
         CLG_(set_instrument_state)("Collect open close", True);
       }
       else if (VG_(strcmp)((HChar*)args[0], CLG_(clo).collect_closefile) == 0){ /* filename */
-        CLG_DEBUG(-1, "collect closefile open\n");
+        CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile open\n");
 
         CLG_(open_close_file_current) = True;
       }
     }
     else if (syscallno == 6){ /* close */
-      CLG_DEBUG(-1, "system call close: fd number = %d\n", (Int)args[0])
-      CLG_DEBUG(-1, "close file fds: %d\n", CLG_(close_file_fds)[0])
+      CLG_DEBUG(CLG_(coc_dbg_level), "system call close: fd number = %d\n", (Int)args[0])
+      CLG_DEBUG(CLG_(coc_dbg_level), "close file fds: %d\n", CLG_(close_file_fds)[0])
 
       if ((Int)args[0] == CLG_(close_file_fds)[0]){ /* fd */
-        CLG_DEBUG(-1, "collect closefile close\n");
+        CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile close\n");
         /* stop instrumentation */
         CLG_(set_instrument_state)("Collect closefile close", False);
       }
     }
   }
+  /*** collect_openclose patch end ***/
 
 
   if (CLG_(clo).collect_systime) {
@@ -1763,16 +1768,18 @@ static
 void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
                             UWord* args, UInt nArgs, SysRes res)
 {
+  /*** collect_openclose patch ***/
   if (CLG_(clo).collect_openclose){
     /* count between Open/Close */
     if (CLG_(open_close_file_current) == True){ /* open */
-      CLG_DEBUG(-1, "collect closefile fd = %d\n", (Int)sr_Res(res))
+      CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile fd = %d\n", (Int)sr_Res(res))
 
       CLG_(num_of_close_file_fds) = 1;
       CLG_(close_file_fds)[0] = sr_Res(res);
       CLG_(open_close_file_current) = False;
     }
   }
+  /*** collect_openclose patch end ***/
 
   if (CLG_(clo).collect_systime &&
       CLG_(current_state).bbcc) {
@@ -2068,7 +2075,7 @@ void CLG_(post_clo_init)(void)
        CLG_(clo).collect_openfile = "input.txt";
        CLG_(clo).collect_closefile = "output.txt";
    }
-   CLG_DEBUG(-1, "collect_openclose is %s.\n", CLG_(clo).collect_openclose?"True":"False");
+   CLG_DEBUG(CLG_(coc_dbg_level), "collect_openclose is %s.\n", CLG_(clo).collect_openclose?"True":"False");
 }
 
 static
