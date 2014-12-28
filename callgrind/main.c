@@ -1697,6 +1697,7 @@ Bool CLG_(handle_client_request)(ThreadId tid, UWord *args, UWord *ret)
    return True;
 }
 
+/* Syscall functions - timing and collect_openclose(coc) */
 
 /* Syscall Timing */
 
@@ -1711,7 +1712,57 @@ ULong syscalltime[VG_N_THREADS];
 UInt syscalltime[VG_N_THREADS];
 #endif
 
+static
+void CLG_(pre_syscalltime)(ThreadId tid, UInt syscallno,
+                           UWord* args, UInt nArgs)
+{
+  if (CLG_(clo).collect_systime) {
+#if CLG_MICROSYSTIME
+    struct vki_timeval tv_now;
+    VG_(do_syscall)(__NR_gettimeofday, (UInt)&tv_now, (UInt)NULL);
+    syscalltime[tid] = tv_now.tv_sec * 1000000ULL + tv_now.tv_usec;
+#else
+    syscalltime[tid] = VG_(read_millisecond_timer)();
+#endif
+  }
+}
+
+static
+void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
+                            UWord* args, UInt nArgs, SysRes res)
+{
+  if (CLG_(clo).collect_systime &&
+      CLG_(current_state).bbcc) {
+      Int o;
+#if CLG_MICROSYSTIME
+    struct vki_timeval tv_now;
+    ULong diff;
+
+    VG_(do_syscall)(__NR_gettimeofday, (UInt)&tv_now, (UInt)NULL);
+    diff = (tv_now.tv_sec * 1000000ULL + tv_now.tv_usec) - syscalltime[tid];
+#else
+    UInt diff = VG_(read_millisecond_timer)() - syscalltime[tid];
+#endif
+
+    /* offset o is for "SysCount", o+1 for "SysTime" */
+    o = fullOffset(EG_SYS);
+    CLG_ASSERT(o>=0);
+    CLG_DEBUG(0,"   Time (Off %d) for Syscall %d: %ull\n", o, syscallno, diff);
+
+    CLG_(current_state).cost[o] ++;
+    CLG_(current_state).cost[o+1] += diff;
+    if (!CLG_(current_state).bbcc->skipped)
+      CLG_(init_cost_lz)(CLG_(sets).full,
+			&(CLG_(current_state).bbcc->skipped));
+    CLG_(current_state).bbcc->skipped[o] ++;
+    CLG_(current_state).bbcc->skipped[o+1] += diff;
+  }
+}
+
 /*** collect_openclose patch ***/
+
+/* Syscall collect_openclose(coc) */
+
 Bool CLG_(open_close_file_current) = False;
 Int CLG_(num_of_close_file_fds) = 0;
 Int CLG_(close_file_fds)[16] = {0};
@@ -1719,10 +1770,8 @@ Int CLG_(coc_dbg_level) = 1;
 /*** collect_openclose patch end ***/
 
 static
-void CLG_(pre_syscalltime)(ThreadId tid, UInt syscallno,
-                           UWord* args, UInt nArgs)
-{
-  /*** collect_openclose patch ***/
+void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
+                           UWord* args, UInt nArgs){
   if (CLG_(clo).collect_openclose){
     /* count between Open/Close */
     if (syscallno == 5){ /* open */
@@ -1750,25 +1799,11 @@ void CLG_(pre_syscalltime)(ThreadId tid, UInt syscallno,
       }
     }
   }
-  /*** collect_openclose patch end ***/
-
-
-  if (CLG_(clo).collect_systime) {
-#if CLG_MICROSYSTIME
-    struct vki_timeval tv_now;
-    VG_(do_syscall)(__NR_gettimeofday, (UInt)&tv_now, (UInt)NULL);
-    syscalltime[tid] = tv_now.tv_sec * 1000000ULL + tv_now.tv_usec;
-#else
-    syscalltime[tid] = VG_(read_millisecond_timer)();
-#endif
-  }
 }
 
 static
-void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
-                            UWord* args, UInt nArgs, SysRes res)
-{
-  /*** collect_openclose patch ***/
+void CLG_(post_syscallcoc)(ThreadId tid, UInt syscallno,
+                            UWord* args, UInt nArgs, SysRes res){
   if (CLG_(clo).collect_openclose){
     /* count between Open/Close */
     if (CLG_(open_close_file_current) == True){ /* open */
@@ -1779,35 +1814,25 @@ void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
       CLG_(open_close_file_current) = False;
     }
   }
-  /*** collect_openclose patch end ***/
-
-  if (CLG_(clo).collect_systime &&
-      CLG_(current_state).bbcc) {
-      Int o;
-#if CLG_MICROSYSTIME
-    struct vki_timeval tv_now;
-    ULong diff;
-    
-    VG_(do_syscall)(__NR_gettimeofday, (UInt)&tv_now, (UInt)NULL);
-    diff = (tv_now.tv_sec * 1000000ULL + tv_now.tv_usec) - syscalltime[tid];
-#else
-    UInt diff = VG_(read_millisecond_timer)() - syscalltime[tid];
-#endif  
-
-    /* offset o is for "SysCount", o+1 for "SysTime" */
-    o = fullOffset(EG_SYS);
-    CLG_ASSERT(o>=0);
-    CLG_DEBUG(0,"   Time (Off %d) for Syscall %d: %ull\n", o, syscallno, diff);
-    
-    CLG_(current_state).cost[o] ++;
-    CLG_(current_state).cost[o+1] += diff;
-    if (!CLG_(current_state).bbcc->skipped)
-      CLG_(init_cost_lz)(CLG_(sets).full,
-			&(CLG_(current_state).bbcc->skipped));
-    CLG_(current_state).bbcc->skipped[o] ++;
-    CLG_(current_state).bbcc->skipped[o+1] += diff;
-  }
 }
+
+/* Syscall main function - do time and coc */
+
+static
+void CLG_(pre_syscall)(ThreadId tid, UInt syscallno,
+                           UWord* args, UInt nArgs){
+  CLG_(pre_syscallcoc)(tid, syscallno, args, nArgs);
+  CLG_(pre_syscalltime)(tid, syscallno, args, nArgs);
+}
+
+static
+void CLG_(post_syscall)(ThreadId tid, UInt syscallno,
+                            UWord* args, UInt nArgs, SysRes res){
+  CLG_(post_syscalltime)(tid, syscallno, args, nArgs, res);
+  CLG_(post_syscallcoc)(tid, syscallno, args, nArgs, res);
+}
+
+/*** collect_openclose patch end ***/
 
 static UInt ULong_width(ULong n)
 {
@@ -2106,8 +2131,8 @@ void CLG_(pre_clo_init)(void)
 				    CLG_(print_debug_usage));
 
     VG_(needs_client_requests)(CLG_(handle_client_request));
-    VG_(needs_syscall_wrapper)(CLG_(pre_syscalltime),
-			       CLG_(post_syscalltime));
+    VG_(needs_syscall_wrapper)(CLG_(pre_syscall),
+			       CLG_(post_syscall));
 
     VG_(track_start_client_code)  ( & clg_start_client_code_callback );
     VG_(track_pre_deliver_signal) ( & CLG_(pre_signal) );
