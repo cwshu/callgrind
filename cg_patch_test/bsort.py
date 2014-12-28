@@ -1,11 +1,11 @@
-#!/usr/bin/python3
+#!/usr/bin/python2
 
 arr1 = []
 arr2 = []
 def init():
     finit = open("rand.txt", "r")
     if not finit:
-        print("rand.txt not exist")
+        print "rand.txt not exist"
     s = finit.read()
     l = s.split(" ")
     global arr1
@@ -25,15 +25,15 @@ init()
 
 fin = open("input.txt", "r")
 if not fin:
-    print("input.txt not exist")
+    print "input.txt not exist"
 fout = open("output.txt", "w")
 if not fout:
-    print("open output.txt error")
+    print "open output.txt error"
 
 bsort(arr1)
 
 fin.close()
 fout.close()
 
-print(arr1)
-print(len(arr1))
+print arr1
+print len(arr1)

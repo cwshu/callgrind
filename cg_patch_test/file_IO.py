@@ -1,10 +1,10 @@
-#!/usr/bin/python3
+#!/usr/bin/python2
 fin = open("input.txt", "r")
 if not fin:
-    print("input.txt not exist")
+    print "input.txt not exist"
 fout = open("output.txt", "w")
 if not fout:
-    print("open output.txt error")
+    print "open output.txt error"
 
 s = fin.readline()
 fout.write(s)
