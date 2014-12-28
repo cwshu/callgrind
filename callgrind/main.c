@@ -1779,6 +1779,28 @@ Int CLG_(coc_dbg_level) = -1;
     Int CLG_(sys_close_num) = 6;
 #endif
 
+Int path_cmp(const HChar* path1, const HChar* path2){
+  /* simple path comparsion 
+   * just add checking for relative path start with ./ and not.
+   *
+   * not progress now
+   * 1. .. and . in path
+   * 2. relative and absolute path
+   * 3. symbolic link
+   * 4. hard link
+   */
+  const HChar* p1 = path1;
+  const HChar* p2 = path2;
+
+  /* relative path start with ./ */
+  if(VG_(strncmp)(p1, "./", 2) == 0)
+      p1 += 2;
+  if(VG_(strncmp)(p2, "./", 2) == 0)
+      p2 += 2;
+  
+  return VG_(strcmp)(p1, p2);
+}
+
 static
 void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
                            UWord* args, UInt nArgs){
@@ -1787,12 +1809,12 @@ void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
     if (syscallno == CLG_(sys_open_num)){ /* open */
       CLG_DEBUG(CLG_(coc_dbg_level), "system call open: filename = %s\n", (HChar*)args[0])
 
-      if (VG_(strcmp)((HChar*)args[0], CLG_(clo).collect_openfile) == 0){ /* filename */
+      if (path_cmp((HChar*)args[0], CLG_(clo).collect_openfile) == 0){ /* filename */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect openfile open\n");
         /* start instrumentation */
-        CLG_(set_instrument_state)("Collect open close", True);
+        CLG_(set_instrument_state)("COC: open", True);
       }
-      else if (VG_(strcmp)((HChar*)args[0], CLG_(clo).collect_closefile) == 0){ /* filename */
+      else if (path_cmp((HChar*)args[0], CLG_(clo).collect_closefile) == 0){ /* filename */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile open\n");
 
         CLG_(open_close_file_current) = True;
@@ -1805,7 +1827,7 @@ void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
       if ((Int)args[0] == CLG_(close_file_fds)[0]){ /* fd */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile close\n");
         /* stop instrumentation */
-        CLG_(set_instrument_state)("Collect closefile close", False);
+        CLG_(set_instrument_state)("COC: close", False);
       }
     }
   }
