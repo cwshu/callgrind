@@ -18,8 +18,8 @@ def bsort(arr):
     size = len(arr)
     for i in range(size-1):
         for j in range(size-1-i):
-            if arr[i] > arr[j]:
-                arr[i], arr[j] = arr[j], arr[i]
+            if arr[i+j] > arr[i+j+1]:
+                arr[i+j], arr[i+j+1] = arr[i+j+1], arr[i+j]
 
 init()
 
