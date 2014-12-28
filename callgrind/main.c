@@ -1766,7 +1766,7 @@ void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
 Bool CLG_(open_close_file_current) = False;
 Int CLG_(num_of_close_file_fds) = 0;
 Int CLG_(close_file_fds)[16] = {0};
-Int CLG_(coc_dbg_level) = -1;
+Int CLG_(coc_dbg_level) = 1;
 #if defined(VGP_x86_linux)
     Int CLG_(sys_open_num) = 5;
     Int CLG_(sys_close_num) = 6;
