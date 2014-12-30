@@ -35,5 +35,5 @@ bsort(arr1)
 fin.close()
 fout.close()
 
-print arr1
-print len(arr1)
+# print arr1
+print "num of elements = ", len(arr1)

@@ -45,10 +45,10 @@ int main(){
     fout.close();
 
     bsort(arr2, SIZE);
-    for( int i=0; i<SIZE; i++ ){
-        std::cout << arr1[i] << " ";
-    }
-    std::cout << std::endl;
+    // for( int i=0; i<SIZE; i++ ){
+    //     std::cout << arr1[i] << " ";
+    // }
+    // std::cout << std::endl;
 
     return 0;
 }
