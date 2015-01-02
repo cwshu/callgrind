@@ -100,6 +100,47 @@ static void CLG_(init_statistics)(Statistics* s)
   s->bbcc_clones         = 0;
 }
 
+/*** collect_openclose patch ***/
+static void CLG_(copy_statistics)(Statistics* dest, Statistics* src)
+{
+  dest->call_counter        = src->call_counter;
+  dest->jcnd_counter        = src->jcnd_counter;
+  dest->jump_counter        = src->jump_counter;
+  dest->rec_call_counter    = src->rec_call_counter;
+  dest->ret_counter         = src->ret_counter;
+  dest->bb_executions       = src->bb_executions;
+
+  dest->context_counter     = src->context_counter;
+  dest->bb_retranslations   = src->bb_retranslations;  
+
+  dest->distinct_objs       = src->distinct_objs;
+  dest->distinct_files      = src->distinct_files;
+  dest->distinct_fns        = src->distinct_fns;
+  dest->distinct_contexts   = src->distinct_contexts;
+  dest->distinct_bbs        = src->distinct_bbs;
+  dest->distinct_jccs       = src->distinct_jccs;
+  dest->distinct_bbccs      = src->distinct_bbccs;
+  dest->distinct_instrs     = src->distinct_instrs;
+  dest->distinct_skips      = src->distinct_skips;
+
+  dest->bb_hash_resizes     = src->bb_hash_resizes;
+  dest->bbcc_hash_resizes   = src->bbcc_hash_resizes;
+  dest->jcc_hash_resizes    = src->jcc_hash_resizes;
+  dest->cxt_hash_resizes    = src->cxt_hash_resizes;
+  dest->fn_array_resizes    = src->fn_array_resizes;
+  dest->call_stack_resizes  = src->call_stack_resizes;
+  dest->fn_stack_resizes    = src->fn_stack_resizes;
+
+  dest->full_debug_BBs      = src->full_debug_BBs;
+  dest->file_line_debug_BBs = src->file_line_debug_BBs;
+  dest->fn_name_debug_BBs   = src->fn_name_debug_BBs;
+  dest->no_debug_BBs        = src->no_debug_BBs;
+  dest->bbcc_lru_misses     = src->bbcc_lru_misses;
+  dest->jcc_lru_misses      = src->jcc_lru_misses;
+  dest->cxt_lru_misses      = src->cxt_lru_misses;
+  dest->bbcc_clones         = src->bbcc_clones;
+}                            
+/*** collect_openclose patch end ***/
 
 /*------------------------------------------------------------*/
 /*--- Simple callbacks (not cache similator)               ---*/
@@ -1761,12 +1802,44 @@ void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
 
 /*** collect_openclose patch ***/
 
+Int CLG_(coc_dbg_level) = 1; /* debug msg */
+
+/* array struct */
+#define MAX_NUM_OF_CLOSEFILE 16
+typedef struct {
+  Int num_of_item;
+  Int items[MAX_NUM_OF_CLOSEFILE];
+} CLG_(array);
+
+void CLG_(array_push_back)(CLG_(array)* array, Int num){
+  if (array->num_of_item >= MAX_NUM_OF_CLOSEFILE){
+    CLG_DEBUG(CLG_(coc_dbg_level), "open closefile more than %d times\n", MAX_NUM_OF_CLOSEFILE);
+    return;
+  }
+
+  array->items[array->num_of_item] = num;
+  array->num_of_item++;
+}
+
+Bool CLG_(array_pop)(CLG_(array)* array, Int num){
+  Int i;
+  for (i=0; i<array->num_of_item; i++){
+    if (array->items[i] == num){
+      array->items[i] = array->items[array->num_of_item-1];
+      array->num_of_item--;
+      return True;
+    }
+  } 
+
+  return False;
+}
+
 /* Syscall collect_openclose(coc) */
 
+CLG_(array) CLG_(close_file_fd_list);
+Statistics CLG_(last_close_stat);
 Bool CLG_(open_close_file_current) = False;
-Int CLG_(num_of_close_file_fds) = 0;
-Int CLG_(close_file_fds)[16] = {0};
-Int CLG_(coc_dbg_level) = 1;
+
 #if defined(VGP_x86_linux)
     Int CLG_(sys_open_num) = 5;
     Int CLG_(sys_close_num) = 6;
@@ -1779,26 +1852,18 @@ Int CLG_(coc_dbg_level) = 1;
     Int CLG_(sys_close_num) = 6;
 #endif
 
-Int path_cmp(const HChar* path1, const HChar* path2){
+Bool path_include_filename(const HChar* path, const HChar* filename){
   /* simple path comparsion 
-   * just add checking for relative path start with ./ and not.
-   *
-   * not progress now
-   * 1. .. and . in path
-   * 2. relative and absolute path
-   * 3. symbolic link
-   * 4. hard link
+   * if path is including filename
    */
-  const HChar* p1 = path1;
-  const HChar* p2 = path2;
+  const HChar* filename_ptr = filename;
 
-  /* relative path start with ./ */
-  if(VG_(strncmp)(p1, "./", 2) == 0)
-      p1 += 2;
-  if(VG_(strncmp)(p2, "./", 2) == 0)
-      p2 += 2;
+  /* if filename is relative path start with ./, just use filename */
+  if(VG_(strncmp)(filename_ptr, "./", 2) == 0)
+      filename_ptr += 2;
   
-  return VG_(strcmp)(p1, p2);
+  Int ret = (Int)VG_(strstr)(path, filename_ptr);
+  return toBool(ret);
 }
 
 static
@@ -1809,12 +1874,12 @@ void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
     if (syscallno == CLG_(sys_open_num)){ /* open */
       CLG_DEBUG(CLG_(coc_dbg_level), "system call open: filename = %s\n", (HChar*)args[0])
 
-      if (path_cmp((HChar*)args[0], CLG_(clo).collect_openfile) == 0){ /* filename */
+      if (path_include_filename((HChar*)args[0], CLG_(clo).collect_openfile)){ /* filename */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect openfile open\n");
         /* start instrumentation */
         CLG_(set_instrument_state)("COC: open", True);
       }
-      else if (path_cmp((HChar*)args[0], CLG_(clo).collect_closefile) == 0){ /* filename */
+      else if (path_include_filename((HChar*)args[0], CLG_(clo).collect_closefile)){ /* filename */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile open\n");
 
         CLG_(open_close_file_current) = True;
@@ -1822,12 +1887,18 @@ void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
     }
     else if (syscallno == CLG_(sys_close_num)){ /* close */
       CLG_DEBUG(CLG_(coc_dbg_level), "system call close: fd number = %d\n", (Int)args[0])
-      CLG_DEBUG(CLG_(coc_dbg_level), "close file fds: %d\n", CLG_(close_file_fds)[0])
 
-      if ((Int)args[0] == CLG_(close_file_fds)[0]){ /* fd */
+      Int close_fd = (Int)args[0];
+      if (CLG_(array_pop)(&CLG_(close_file_fd_list), close_fd)){
+        /* close_fd is in CLG_(close_file_fd_list) */
+
         CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile close\n");
-        /* stop instrumentation */
-        CLG_(set_instrument_state)("COC: close", False);
+        if (CLG_(close_file_fd_list).num_of_item == 0){
+          /* close all closefiles */
+          CLG_DEBUG(CLG_(coc_dbg_level), "collect all closefiles close\n");
+          CLG_(copy_statistics)(&CLG_(last_close_stat), &CLG_(stat));
+          // CLG_(set_instrument_state)("COC: close", False);
+        }
       }
     }
   }
@@ -1841,8 +1912,7 @@ void CLG_(post_syscallcoc)(ThreadId tid, UInt syscallno,
     if (CLG_(open_close_file_current) == True){ /* open */
       CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile fd = %d\n", (Int)sr_Res(res))
 
-      CLG_(num_of_close_file_fds) = 1;
-      CLG_(close_file_fds)[0] = sr_Res(res);
+      CLG_(array_push_back)(&CLG_(close_file_fd_list), sr_Res(res));
       CLG_(open_close_file_current) = False;
     }
   }
@@ -2044,9 +2114,19 @@ void finish(void)
 
 }
 
+void use_last_closefile_stat(){
+    CLG_(copy_statistics)(&CLG_(stat), &CLG_(last_close_stat));
+}
 
 void CLG_(fini)(Int exitcode)
 {
+  if (CLG_(clo).collect_openclose){
+    if (CLG_(close_file_fd_list).num_of_item == 0){
+      /* closing all */
+      use_last_closefile_stat();
+    }
+  }
+
   finish();
 }
 
@@ -2131,6 +2211,8 @@ void CLG_(post_clo_init)(void)
        CLG_(instrument_state) = False;
        CLG_(clo).collect_openfile = "input.txt";
        CLG_(clo).collect_closefile = "output.txt";
+        VG_(memset)((void*)&CLG_(close_file_fd_list), 0, sizeof(CLG_(array)));
+        CLG_(init_statistics)(&CLG_(last_close_stat));
    }
    CLG_DEBUG(CLG_(coc_dbg_level), "collect_openclose is %s.\n", CLG_(clo).collect_openclose?"True":"False");
 }
