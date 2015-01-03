@@ -1985,6 +1985,9 @@ void branchsim_printstat(int l1, int l2, int l3)
     VG_(umsg)("Mispred rate:  %s (%s     + %s   )\n", buf1, buf2,buf3);
 }
 
+void use_last_closefile_stat(){
+    CLG_(copy_statistics)(&CLG_(stat), &CLG_(last_close_stat));
+}
 
 static
 void finish(void)
@@ -2001,6 +2004,15 @@ void finish(void)
   /* pop all remaining items from CallStack for correct sum
    */
   CLG_(forall_threads)(unwind_thread);
+
+  /* collect_openclose, using last_closefile_stat
+   */
+  if (CLG_(clo).collect_openclose){
+    if (CLG_(close_file_fd_list).num_of_item == 0){
+      /* closing all */
+      use_last_closefile_stat();
+    }
+  }
 
   CLG_(dump_profile)(0, False);
 
@@ -2114,19 +2126,8 @@ void finish(void)
 
 }
 
-void use_last_closefile_stat(){
-    CLG_(copy_statistics)(&CLG_(stat), &CLG_(last_close_stat));
-}
-
 void CLG_(fini)(Int exitcode)
 {
-  if (CLG_(clo).collect_openclose){
-    if (CLG_(close_file_fd_list).num_of_item == 0){
-      /* closing all */
-      use_last_closefile_stat();
-    }
-  }
-
   finish();
 }
 
