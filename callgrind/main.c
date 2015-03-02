@@ -1802,54 +1802,90 @@ void CLG_(post_syscalltime)(ThreadId tid, UInt syscallno,
 
 /*** collect_openclose patch ***/
 
-Int CLG_(coc_dbg_level) = 1; /* debug msg */
-
-/* array struct */
-#define MAX_NUM_OF_CLOSEFILE 16
-typedef struct {
-  Int num_of_item;
-  Int items[MAX_NUM_OF_CLOSEFILE];
-} CLG_(array);
-
-void CLG_(array_push_back)(CLG_(array)* array, Int num){
-  if (array->num_of_item >= MAX_NUM_OF_CLOSEFILE){
-    CLG_DEBUG(CLG_(coc_dbg_level), "open closefile more than %d times\n", MAX_NUM_OF_CLOSEFILE);
-    return;
-  }
-
-  array->items[array->num_of_item] = num;
-  array->num_of_item++;
-}
-
-Bool CLG_(array_pop)(CLG_(array)* array, Int num){
-  Int i;
-  for (i=0; i<array->num_of_item; i++){
-    if (array->items[i] == num){
-      array->items[i] = array->items[array->num_of_item-1];
-      array->num_of_item--;
-      return True;
-    }
-  } 
-
-  return False;
-}
-
 /* Syscall collect_openclose(coc) */
+#define MAX_CLOSE_FILE_FD 2048
 
-CLG_(array) CLG_(close_file_fd_list);
+struct int_set {
+    Int items[MAX_CLOSE_FILE_FD];
+    Int size;
+    Int capacity;
+};
+
+void int_set_init(struct int_set* this){
+    this->size = 0;
+    this->capacity = MAX_CLOSE_FILE_FD;
+}
+
+void int_set_add(struct int_set* this, Int num){
+    if (this->size >= this->capacity){
+        return;
+    }
+    this->items[this->size] = num;
+    this->size++;
+}
+
+Bool int_set_is_inset(struct int_set* this, Int num){
+    Int i;
+    for(i=0; i<this->size; i++){
+        if (this->items[i] == num){
+            return True;
+        }
+    }
+    return False;
+}
+
+Bool int_set_remove(struct int_set* this, Int num){
+    if (this->size == 0){
+        return False;
+    }
+
+    Int i;
+    Bool removed = False;
+    for(i=0; i<this->size; i++){
+        if (removed){
+            this->items[i-1] = this->items[i];
+            continue;
+        }
+
+        if (this->items[i] == num){
+            // item[i] is removed.
+            removed = True;
+        }
+    }
+
+    if (removed){
+        this->size--;
+        return True;
+    }
+    return False;
+}
+
 Statistics CLG_(last_close_stat);
 Bool CLG_(open_close_file_current) = False;
-
+Bool CLG_(dup_close_file_current) = False;
+// Int CLG_(num_of_close_file_fds) = 0;
+// Int CLG_(close_file_fds)[16] = {0};
+struct int_set CLG_(close_file_fds);
+Int CLG_(coc_dbg_level) = 1;
 #if defined(VGP_x86_linux)
     Int CLG_(sys_open_num) = 5;
     Int CLG_(sys_close_num) = 6;
+    Int CLG_(sys_dup_num) = 41;
+    Int CLG_(sys_dup2_num) = 63;
+    Int CLG_(sys_dup3_num) = 330;
 #elif defined(VGP_amd64_linux)
     Int CLG_(sys_open_num) = 2;
     Int CLG_(sys_close_num) = 3;
+    Int CLG_(sys_dup_num) = 32;
+    Int CLG_(sys_dup2_num) = 33;
+    Int CLG_(sys_dup3_num) = 292;
 #else
     CLG_DEBUG(CLG_(coc_dbg_level), "Unsupported platform, open()/close() use x86 system call number");
     Int CLG_(sys_open_num) = 5;
     Int CLG_(sys_close_num) = 6;
+    Int CLG_(sys_dup_num) = 41;
+    Int CLG_(sys_dup2_num) = 63;
+    Int CLG_(sys_dup3_num) = 330;
 #endif
 
 Bool path_include_filename(const HChar* path, const HChar* filename){
@@ -1869,17 +1905,22 @@ Bool path_include_filename(const HChar* path, const HChar* filename){
 static
 void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
                            UWord* args, UInt nArgs){
+  /*
+   * need comment.
+   */
   if (CLG_(clo).collect_openclose){
     /* count between Open/Close */
     if (syscallno == CLG_(sys_open_num)){ /* open */
       CLG_DEBUG(CLG_(coc_dbg_level), "system call open: filename = %s\n", (HChar*)args[0])
 
-      if (path_include_filename((HChar*)args[0], CLG_(clo).collect_openfile)){ /* filename */
+      if (path_include_filename((HChar*)args[0], CLG_(clo).collect_openfile)){
+        /* if open input file */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect openfile open\n");
         /* start instrumentation */
         CLG_(set_instrument_state)("COC: open", True);
       }
-      else if (path_include_filename((HChar*)args[0], CLG_(clo).collect_closefile)){ /* filename */
+      else if (path_include_filename((HChar*)args[0], CLG_(clo).collect_closefile)){
+        /* if open output file */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile open\n");
 
         CLG_(open_close_file_current) = True;
@@ -1887,18 +1928,27 @@ void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
     }
     else if (syscallno == CLG_(sys_close_num)){ /* close */
       CLG_DEBUG(CLG_(coc_dbg_level), "system call close: fd number = %d\n", (Int)args[0])
-
-      Int close_fd = (Int)args[0];
-      if (CLG_(array_pop)(&CLG_(close_file_fd_list), close_fd)){
-        /* close_fd is in CLG_(close_file_fd_list) */
-
+      // CLG_DEBUG(CLG_(coc_dbg_level), "close file fds: %d\n", CLG_(close_file_fds)[0])
+      
+      if (int_set_is_inset(&CLG_(close_file_fds), (Int)args[0])){
+        /* if closing output file */
         CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile close\n");
-        if (CLG_(close_file_fd_list).num_of_item == 0){
-          /* close all closefiles */
-          CLG_DEBUG(CLG_(coc_dbg_level), "collect all closefiles close\n");
+        int_set_remove(&CLG_(close_file_fds), (Int)args[0]);
+        if (CLG_(close_file_fds).size == 0){
+          /* stop instrumentation */
+          CLG_DEBUG(CLG_(coc_dbg_level), "all closefiles are closed\n");
           CLG_(copy_statistics)(&CLG_(last_close_stat), &CLG_(stat));
           // CLG_(set_instrument_state)("COC: close", False);
         }
+      }
+    }
+    else if (syscallno == CLG_(sys_dup_num) || syscallno == CLG_(sys_dup2_num) || syscallno == CLG_(sys_dup3_num)){
+      CLG_DEBUG(CLG_(coc_dbg_level), "system call dup: old fd number = %d\n", (Int)args[0])
+      if (int_set_is_inset(&CLG_(close_file_fds), (Int)args[0])){
+        /* if duping output file */
+        CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile dup\n");
+
+        CLG_(dup_close_file_current) = True;
       }
     }
   }
@@ -1911,9 +1961,19 @@ void CLG_(post_syscallcoc)(ThreadId tid, UInt syscallno,
     /* count between Open/Close */
     if (CLG_(open_close_file_current) == True){ /* open */
       CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile fd = %d\n", (Int)sr_Res(res))
-
-      CLG_(array_push_back)(&CLG_(close_file_fd_list), sr_Res(res));
+      int_set_add(&CLG_(close_file_fds), sr_Res(res));
+      // CLG_(num_of_close_file_fds) = 1;
+      // CLG_(close_file_fds)[0] = sr_Res(res);
       CLG_(open_close_file_current) = False;
+    }
+    else if (CLG_(dup_close_file_current) == True){ /* dup */
+      if ((Int)sr_Res < 0){
+        CLG_DEBUG(CLG_(coc_dbg_level), "dup failed\n");
+        return;
+      }
+      CLG_DEBUG(CLG_(coc_dbg_level), "collect closefile fd(dup) = %d\n", (Int)sr_Res(res))
+      int_set_add(&CLG_(close_file_fds), sr_Res(res));
+      CLG_(dup_close_file_current) = False;
     }
   }
 }
@@ -2212,8 +2272,8 @@ void CLG_(post_clo_init)(void)
        CLG_(instrument_state) = False;
        CLG_(clo).collect_openfile = "input.txt";
        CLG_(clo).collect_closefile = "output.txt";
-        VG_(memset)((void*)&CLG_(close_file_fd_list), 0, sizeof(CLG_(array)));
-        CLG_(init_statistics)(&CLG_(last_close_stat));
+       int_set_init(&CLG_(close_file_fds));
+       CLG_(init_statistics)(&CLG_(last_close_stat));
    }
    CLG_DEBUG(CLG_(coc_dbg_level), "collect_openclose is %s.\n", CLG_(clo).collect_openclose?"True":"False");
 }
