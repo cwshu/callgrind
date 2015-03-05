@@ -2068,9 +2068,9 @@ void finish(void)
   /* collect_openclose, using last_closefile_stat
    */
   if (CLG_(clo).collect_openclose){
-    if (CLG_(close_file_fd_list).num_of_item == 0){
+    if (CLG_(close_file_fds).size == 0){
       /* closing all */
-      use_last_closefile_stat();
+      // use_last_closefile_stat();
     }
   }
 
