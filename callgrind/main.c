@@ -1938,7 +1938,7 @@ void CLG_(pre_syscallcoc)(ThreadId tid, UInt syscallno,
           /* stop instrumentation */
           CLG_DEBUG(CLG_(coc_dbg_level), "all closefiles are closed\n");
           CLG_(copy_statistics)(&CLG_(last_close_stat), &CLG_(stat));
-          // CLG_(set_instrument_state)("COC: close", False);
+          CLG_(set_instrument_state)("COC: close", False);
         }
       }
     }
